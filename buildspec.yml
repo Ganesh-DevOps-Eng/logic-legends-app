@@ -1,0 +1,57 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+  pre_build:
+    commands:
+      - echo "Starting pre-build phase..."
+      - echo "Changing to logic-legends-app directory..."
+      - |
+        cd logic-legends-app || { echo "Error: logic-legends-app directory not found!"; exit 1; }
+        echo "Installing dependencies..."
+        if [ -f package-lock.json ]; then 
+          echo "Using npm ci"
+          npm ci
+        else 
+          echo "Lockfile not found, using npm install"
+          npm install
+        fi
+        echo "Dependencies installed successfully"
+      
+  build:
+    commands:
+      - echo "Build started on `date`"
+      - echo "Building TypeScript application..."
+      - |
+        cd logic-legends-app
+        npm run build
+        echo "Build completed on `date`"
+      
+  post_build:
+    commands:
+      - echo "Post-build phase started"
+      - |
+        cd logic-legends-app
+        echo "Installing production dependencies..."
+        npm install --production
+        echo "Including CodeDeploy manifest and hooks..."
+        cp ../appspec.yml .
+        cp -R ../scripts .
+        chmod +x scripts/*.sh || true
+        echo "Creating deployment package..."
+        # Do NOT exclude node_modules since we installed production deps
+        zip -r ../app.zip . -x "*.git*" -x "*.md" -x "*.log" -x "buildspec.yml" -x ".github/*"
+        cd ..
+      - 'echo "Package created: app.zip"'
+      - echo "Skipping manual CodeDeploy trigger; CodePipeline Deploy stage will handle deployment."
+
+artifacts:
+  files:
+    - app.zip
+  name: app.zip
+
+cache:
+  paths:
+    - logic-legends-app/node_modules/**/*

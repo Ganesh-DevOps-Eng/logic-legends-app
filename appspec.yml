@@ -1,0 +1,31 @@
+version: 0.0
+os: linux
+
+files:
+  - source: /
+    destination: /var/www/app
+
+hooks:
+  BeforeInstall:
+    - location: scripts/fetch_env.sh
+      timeout: 120
+      runas: ec2-user
+    - location: scripts/stop_server.sh
+      timeout: 60
+      runas: ec2-user
+
+  AfterInstall:
+    - location: scripts/install_dependencies.sh
+      timeout: 120
+      runas: ec2-user
+
+  ApplicationStart:
+    - location: scripts/start_server.sh
+      timeout: 120
+      runas: ec2-user
+
+  AfterAllowTestTraffic:
+    - location: scripts/run_tests.sh
+      timeout: 120
+      runas: ec2-user
+
