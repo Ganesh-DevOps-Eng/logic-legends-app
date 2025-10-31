@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -e
 
 APP_DIR="/var/www/app"
 REGION="${AWS_REGION:-us-east-2}"
@@ -17,7 +17,10 @@ get_param() {
 PROJECT_NAME="${PROJECT_NAME:-logic-legends}"
 ENV="${ENV:-prod}"
 
-mkdir -p "$APP_DIR"
+# Create directory with sudo if needed, then ensure ec2-user owns it
+echo "Creating application directory: $APP_DIR"
+sudo mkdir -p "$APP_DIR" || { echo "ERROR: Failed to create directory"; exit 1; }
+sudo chown -R ec2-user:ec2-user "$APP_DIR" || { echo "ERROR: Failed to set ownership"; exit 1; }
 cat > "$APP_DIR/.env" <<EOF
 PORT=3000
 NODE_ENV=production
@@ -29,7 +32,8 @@ DB_PASSWORD=$(get_param "/logic-legends/${ENV}/DB_PASSWORD")
 AWS_REGION=$REGION
 EOF
 
-chmod 600 "$APP_DIR/.env"
+chmod 600 "$APP_DIR/.env" || true
 echo ".env written to $APP_DIR/.env"
+echo "Environment file created successfully"
 
 
