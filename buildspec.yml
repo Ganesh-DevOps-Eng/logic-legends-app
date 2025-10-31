@@ -47,20 +47,66 @@ phases:
         echo "✅ appspec.yml found at: $(pwd)/appspec.yml"
         
         echo "Creating deployment package..."
-        # Create zip file - appspec.yml MUST be at root level
-        zip -r ../app.zip . -x "*.git*" -x "*.md" -x "*.log" -x "buildspec.yml" -x ".github/*" || { echo "ERROR: Failed to create zip"; exit 1; }
+        echo "Current directory: $(pwd)"
+        echo "Contents before zipping:"
+        ls -la | head -20
+        
+        # Create zip file from current directory (logic-legends-app/)
+        # This will put all files at the root of the zip
+        zip -r ../app.zip . \
+          -x "*.git*" \
+          -x "*.md" \
+          -x "*.log" \
+          -x "buildspec.yml" \
+          -x ".github/*" \
+          -x "DEPLOYMENT_NOTES.md" \
+          -x "README.md" || { echo "ERROR: Failed to create zip"; exit 1; }
         
         cd ..
         
-        # Verify appspec.yml is in the zip at ROOT level
-        echo "Verifying appspec.yml is in zip at root level..."
-        unzip -l app.zip | grep -E "^.*appspec\.yml$" || { 
-          echo "ERROR: appspec.yml not found in zip at root level!"
-          echo "Zip contents:"
-          unzip -l app.zip | head -20
+        echo "=== VERIFYING ZIP STRUCTURE ==="
+        echo "Zip file location: $(pwd)/app.zip"
+        echo "Zip file size: $(du -h app.zip)"
+        echo ""
+        echo "Full zip contents:"
+        unzip -l app.zip
+        echo ""
+        echo "=== CHECKING FOR appspec.yml ==="
+        
+        # Check if appspec.yml exists at root (not in any subdirectory)
+        if unzip -l app.zip 2>/dev/null | awk '{print $4}' | grep -E "^appspec\.yml$" > /dev/null; then
+          echo "✅ appspec.yml found at ROOT level of zip"
+        else
+          echo "❌ ERROR: appspec.yml NOT found at root level!"
+          echo "Checking if appspec.yml exists anywhere in zip..."
+          unzip -l app.zip | grep -i appspec || echo "❌ No appspec.yml found anywhere!"
+          exit 1
+        fi
+        
+        # Verify we can extract it
+        echo "Testing extraction of appspec.yml..."
+        ZIP_PATH="$(pwd)/app.zip"
+        echo "Zip path: $ZIP_PATH"
+        mkdir -p /tmp/zip-test
+        cd /tmp/zip-test
+        unzip -j "$ZIP_PATH" appspec.yml 2>&1 || {
+          echo "❌ ERROR: Could not extract appspec.yml from zip!"
+          cd "$(dirname "$ZIP_PATH")"
+          rm -rf /tmp/zip-test
           exit 1
         }
-        echo "✅ appspec.yml verified in zip file at root level"
+        if [ -f appspec.yml ]; then
+          echo "✅ Successfully extracted appspec.yml"
+          echo "First 5 lines of appspec.yml:"
+          cat appspec.yml | head -5
+          rm -rf /tmp/zip-test
+        else
+          echo "❌ ERROR: appspec.yml file not found after extraction!"
+          rm -rf /tmp/zip-test
+          exit 1
+        fi
+        
+        cd "$(dirname "$ZIP_PATH")"
       - 'echo "Package created: app.zip"'
       - echo "Skipping manual CodeDeploy trigger; CodePipeline Deploy stage will handle deployment."
 
