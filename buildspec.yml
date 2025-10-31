@@ -37,13 +37,30 @@ phases:
         echo "Installing production dependencies..."
         npm install --production
         echo "Including CodeDeploy manifest and hooks..."
-        cp ../appspec.yml .
-        cp -R ../scripts .
+        cp ../appspec.yml . || { echo "ERROR: Failed to copy appspec.yml"; exit 1; }
+        cp -R ../scripts . || { echo "ERROR: Failed to copy scripts"; exit 1; }
         chmod +x scripts/*.sh || true
+        
+        # Verify appspec.yml exists before zipping
+        echo "Verifying appspec.yml exists..."
+        ls -la appspec.yml || { echo "ERROR: appspec.yml not found in logic-legends-app/"; exit 1; }
+        echo "✅ appspec.yml found at: $(pwd)/appspec.yml"
+        
         echo "Creating deployment package..."
-        # Do NOT exclude node_modules since we installed production deps
-        zip -r ../app.zip . -x "*.git*" -x "*.md" -x "*.log" -x "buildspec.yml" -x ".github/*"
+        # Create zip file - appspec.yml MUST be at root level
+        zip -r ../app.zip . -x "*.git*" -x "*.md" -x "*.log" -x "buildspec.yml" -x ".github/*" || { echo "ERROR: Failed to create zip"; exit 1; }
+        
         cd ..
+        
+        # Verify appspec.yml is in the zip at ROOT level
+        echo "Verifying appspec.yml is in zip at root level..."
+        unzip -l app.zip | grep -E "^.*appspec\.yml$" || { 
+          echo "ERROR: appspec.yml not found in zip at root level!"
+          echo "Zip contents:"
+          unzip -l app.zip | head -20
+          exit 1
+        }
+        echo "✅ appspec.yml verified in zip file at root level"
       - 'echo "Package created: app.zip"'
       - echo "Skipping manual CodeDeploy trigger; CodePipeline Deploy stage will handle deployment."
 
