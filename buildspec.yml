@@ -102,7 +102,24 @@ phases:
         # Create zip from deployment directory - appspec.yml MUST be at root
         echo "Creating zip from deployment directory..."
         cd "$DEPLOY_DIR"
-        zip -r "$SOURCE_ROOT/app.zip" . \
+        
+        # Ensure we're in the deployment directory with appspec.yml
+        echo "Current directory before zip: $(pwd)"
+        echo "Files in deployment directory (first 20):"
+        ls -la | head -20
+        echo "Checking appspec.yml exists:"
+        ls -la appspec.yml || { echo "ERROR: appspec.yml not in deployment dir!"; exit 1; }
+        
+        # Create zip file - CodeBuild artifact should be in CODEBUILD_SRC_DIR
+        ARTIFACT_DIR="${CODEBUILD_SRC_DIR:-$SOURCE_ROOT}"
+        ZIP_FILE="$ARTIFACT_DIR/app.zip"
+        echo "Creating zip at: $ZIP_FILE"
+        
+        # Remove old zip if exists
+        rm -f "$ZIP_FILE"
+        
+        # Create zip with all files from current directory (deployment dir)
+        zip -r "$ZIP_FILE" . \
           -x "*.git*" \
           -x "*.md" \
           -x "*.log" \
@@ -111,39 +128,54 @@ phases:
           -x "DEPLOYMENT_NOTES.md" \
           -x "README.md" || { echo "ERROR: Failed to create zip"; exit 1; }
         
-        cd "$SOURCE_ROOT"
+        echo "Zip created. Verifying..."
+        cd "$ARTIFACT_DIR"
+        echo "Artifact directory: $(pwd)"
+        ls -lah app.zip || { echo "ERROR: app.zip not found in artifact dir!"; exit 1; }
         
         echo "=== VERIFYING ZIP STRUCTURE ==="
         echo "Zip file location: $(pwd)/app.zip"
         echo "Zip file size: $(du -h app.zip)"
         echo ""
-        echo "Full zip contents (showing all entries):"
-        unzip -l app.zip
+        echo "Full zip contents:"
+        unzip -l app.zip | head -30
+        echo "..."
+        unzip -l app.zip | tail -10
         echo ""
         echo "=== CHECKING FOR appspec.yml ==="
         
-        # Check if appspec.yml exists at root (exact match, no leading path)
-        if unzip -l app.zip 2>/dev/null | awk 'NR>3 && NF>=4 {print $4}' | grep -xE "appspec\.yml$" > /dev/null; then
+        # List all files in zip and check for appspec.yml at root
+        ZIP_FILES=$(unzip -l app.zip 2>/dev/null | awk 'NR>3 && NF>=4 {print $4}')
+        echo "Total files in zip: $(echo "$ZIP_FILES" | wc -l)"
+        
+        # Check if appspec.yml exists at root (exact match)
+        if echo "$ZIP_FILES" | grep -xE "^appspec\.yml$" > /dev/null; then
           echo "✅ appspec.yml found at ROOT level of zip"
         else
           echo "❌ ERROR: appspec.yml NOT found at root level!"
-          echo "All files in zip:"
-          unzip -l app.zip | awk 'NR>3 && NF>=4 {print $4}'
-          echo "Looking for appspec.yml anywhere..."
-          unzip -l app.zip | grep -i appspec || echo "❌ No appspec.yml found anywhere!"
+          echo "Looking for appspec.yml in zip..."
+          echo "$ZIP_FILES" | grep -i appspec || echo "❌ No appspec.yml found anywhere!"
+          echo ""
+          echo "First 30 files in zip:"
+          echo "$ZIP_FILES" | head -30
           exit 1
         fi
         
-        # Test extraction to verify
+        # Test extraction to verify CodeDeploy will be able to extract it
         echo "Testing extraction of appspec.yml..."
         mkdir -p /tmp/zip-test
         cd /tmp/zip-test
-        unzip -j "$SOURCE_ROOT/app.zip" appspec.yml 2>&1 || {
+        rm -f appspec.yml
+        unzip -j "$ZIP_FILE" appspec.yml 2>&1 || {
           echo "❌ ERROR: Could not extract appspec.yml from zip!"
+          echo "Attempting to see what's in zip..."
+          unzip -l "$ZIP_FILE" | head -20
+          rm -rf /tmp/zip-test
           exit 1
         }
         if [ -f appspec.yml ]; then
           echo "✅ Successfully extracted appspec.yml"
+          echo "File size: $(du -h appspec.yml)"
           echo "First 10 lines of appspec.yml:"
           head -10 appspec.yml
           rm -rf /tmp/zip-test
@@ -152,6 +184,8 @@ phases:
           rm -rf /tmp/zip-test
           exit 1
         fi
+        
+        echo "✅ ZIP VERIFICATION COMPLETE - appspec.yml is at root and extractable"
       - 'echo "Package created: app.zip"'
       - echo "Skipping manual CodeDeploy trigger; CodePipeline Deploy stage will handle deployment."
 
