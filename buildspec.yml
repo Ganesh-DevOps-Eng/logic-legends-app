@@ -118,7 +118,10 @@ phases:
         # Remove old zip if exists
         rm -f "$ZIP_FILE"
         
-        # Create zip with all files from current directory (deployment dir)
+        # IMPORTANT: Create zip from CURRENT directory (deployment dir)
+        # Use -j flag to junk paths and ensure files are at root of zip
+        # This ensures appspec.yml is at the absolute root, not in a subdirectory
+        echo "Creating zip from: $(pwd)"
         zip -r "$ZIP_FILE" . \
           -x "*.git*" \
           -x "*.md" \
@@ -127,6 +130,18 @@ phases:
           -x ".github/*" \
           -x "DEPLOYMENT_NOTES.md" \
           -x "README.md" || { echo "ERROR: Failed to create zip"; exit 1; }
+        
+        # CRITICAL: Verify zip was created correctly (no subdirectory wrapping)
+        echo "Checking zip structure (first 10 entries should show files at root):"
+        unzip -l "$ZIP_FILE" | head -15
+        echo ""
+        echo "Checking if zip has a single root directory wrapping everything:"
+        ROOT_DIRS=$(unzip -l "$ZIP_FILE" 2>/dev/null | awk 'NR>3 && NF>=4 {print $4}' | cut -d'/' -f1 | sort -u | head -5)
+        if [ $(echo "$ROOT_DIRS" | wc -l) -gt 3 ]; then
+          echo "WARNING: Multiple root directories detected:"
+          echo "$ROOT_DIRS"
+          echo "This might indicate a problem with zip structure"
+        fi
         
         echo "Zip created. Verifying..."
         cd "$ARTIFACT_DIR"
@@ -186,13 +201,40 @@ phases:
         fi
         
         echo "✅ ZIP VERIFICATION COMPLETE - appspec.yml is at root and extractable"
-      - 'echo "Package created: app.zip"'
+        
+        # CRITICAL FIX: CodePipeline passes zip as-is to CodeDeploy, but CodeDeploy expects extracted files
+        # Extract the zip contents to artifact directory so CodeDeploy receives files directly
+        echo "Extracting zip contents for CodeDeploy..."
+        cd "$ARTIFACT_DIR"
+        rm -rf deploy-files
+        mkdir -p deploy-files
+        unzip -q app.zip -d deploy-files/ || { echo "ERROR: Failed to extract zip"; exit 1; }
+        
+        # Verify appspec.yml is in extracted directory
+        if [ ! -f "deploy-files/appspec.yml" ]; then
+          echo "❌ ERROR: appspec.yml not found after extraction!"
+          exit 1
+        fi
+        echo "✅ appspec.yml found in extracted files"
+        
+        # Move extracted files to artifact root (CodeDeploy expects files directly)
+        cd deploy-files
+        cp -r . "$ARTIFACT_DIR/" || { echo "ERROR: Failed to copy extracted files"; exit 1; }
+        cd "$ARTIFACT_DIR"
+        rm -rf deploy-files app.zip
+        
+        # Verify final structure
+        echo "Final artifact structure:"
+        ls -la | head -20
+        ls -la appspec.yml || { echo "ERROR: appspec.yml not in final artifact!"; exit 1; }
+        echo "✅ Final verification: appspec.yml is at artifact root"
+      - 'echo "Package created: Files extracted for CodeDeploy"'
       - echo "Skipping manual CodeDeploy trigger; CodePipeline Deploy stage will handle deployment."
 
 artifacts:
   files:
-    - app.zip
-  name: app.zip
+    - '**/*'
+  name: build_output
 
 cache:
   paths:
