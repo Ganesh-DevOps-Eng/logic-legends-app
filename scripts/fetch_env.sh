@@ -24,6 +24,7 @@ sudo chown -R ec2-user:ec2-user "$APP_DIR" || { echo "ERROR: Failed to set owner
 cat > "$APP_DIR/.env" <<EOF
 PORT=3000
 NODE_ENV=production
+HOST=0.0.0.0
 DB_HOST=$(get_param "/logic-legends/${ENV}/DB_HOST")
 DB_PORT=5432
 DB_NAME=$(get_param "/logic-legends/${ENV}/DB_NAME")
